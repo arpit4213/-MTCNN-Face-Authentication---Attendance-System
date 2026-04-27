@@ -287,6 +287,8 @@
         
         let stream = null;
         let isRunning = false;
+        let isProcessing = false;  // Flag to prevent multiple simultaneous requests
+        let hasRecognized = false;  // Flag to stop processing after successful recognition
         let frameCounter = 0;
         let lastRecognitionTime = 0;
         const RECOGNITION_INTERVAL = 500; // Process frame every 500ms to avoid overwhelming the server
@@ -333,6 +335,7 @@
         
         function stopCamera() {
             isRunning = false;
+            hasRecognized = false;  // Reset for potential restart
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
             }
@@ -344,10 +347,10 @@
         }
         
         async function processFrames() {
-            if (!isRunning) return;
+            if (!isRunning || hasRecognized) return;
             
             const currentTime = Date.now();
-            if (currentTime - lastRecognitionTime > RECOGNITION_INTERVAL) {
+            if (currentTime - lastRecognitionTime > RECOGNITION_INTERVAL && !isProcessing) {
                 frameCounter++;
                 frameCount.textContent = `Frames processed: ${frameCounter}`;
                 
@@ -357,6 +360,7 @@
                 
                 // Send to server
                 try {
+                    isProcessing = true;  // Prevent multiple simultaneous requests
                     loading.style.display = 'block';
                     const response = await fetch('{% url "process_frame_api" %}', {
                         method: 'POST',
@@ -370,6 +374,7 @@
                     });
                     
                     loading.style.display = 'none';
+                    isProcessing = false;
                     
                     if (response.ok) {
                         const data = await response.json();
@@ -380,17 +385,20 @@
                             
                             // Stop camera if should_stop flag is true
                             if (data.should_stop) {
+                                hasRecognized = true;  // Prevent further frame processing
                                 setTimeout(() => {
                                     stopCamera();
-                                }, 500); // Brief delay to show the message
+                                }, 1000); // Delay to show the message
                             }
                         }
                     } else {
                         const error = await response.json();
                         console.error('API Error:', error);
+                        isProcessing = false;
                     }
                 } catch (error) {
                     loading.style.display = 'none';
+                    isProcessing = false;
                     console.error('Error sending frame:', error);
                 }
                 

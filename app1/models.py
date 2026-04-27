@@ -18,6 +18,9 @@ class Attendance(models.Model):
     check_in_time = models.DateTimeField(null=True, blank=True)
     check_out_time = models.DateTimeField(null=True, blank=True)
 
+    class Meta:
+        unique_together = ('student', 'date')
+
     def __str__(self):
         return f"{self.student.name} - {self.date}"
 

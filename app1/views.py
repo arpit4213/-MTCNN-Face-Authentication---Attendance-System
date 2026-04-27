@@ -170,20 +170,33 @@ def process_frame_api(request):
             
             recognition_results = []
             should_stop_camera = False
+            processed_names = set()  # Track already processed names in this frame
             
             if test_face_encodings:
                 known_face_encodings, known_face_names = encode_uploaded_images()
                 if known_face_encodings:
                     names = recognize_faces(np.array(known_face_encodings), known_face_names, test_face_encodings, cam_config.threshold)
                     
-                    for name in names:
-                        if name != 'Not Recognized':
-                            students = Student.objects.filter(name=name)
-                            if students.exists():
-                                student = students.first()
+                    # Remove duplicates while preserving recognition validity
+                    unique_names = list(dict.fromkeys([n for n in names if n != 'Not Recognized']))
+                    
+                    for name in unique_names:
+                        # Skip if already processed in this frame
+                        if name in processed_names:
+                            continue
+                        processed_names.add(name)
+                        
+                        students = Student.objects.filter(name=name)
+                        if students.exists():
+                            student = students.first()
+                            
+                            try:
+                                # Manage attendance with atomic operation to prevent duplicates
+                                attendance, created = Attendance.objects.get_or_create(
+                                    student=student, 
+                                    date=datetime.now().date()
+                                )
                                 
-                                # Manage attendance
-                                attendance, created = Attendance.objects.get_or_create(student=student, date=datetime.now().date())
                                 if created:
                                     # First time check-in
                                     attendance.mark_checked_in()
@@ -229,6 +242,16 @@ def process_frame_api(request):
                                             'should_stop': True
                                         })
                                         should_stop_camera = True
+                            except IntegrityError:
+                                # Handle race condition - record was just created by another request
+                                attendance = Attendance.objects.get(student=student, date=datetime.now().date())
+                                recognition_results.append({
+                                    'name': name,
+                                    'status': 'checked_in',
+                                    'message': f'Attendance marked for {name}',
+                                    'should_stop': True
+                                })
+                                should_stop_camera = True
             
             return JsonResponse({
                 'success': True, 
